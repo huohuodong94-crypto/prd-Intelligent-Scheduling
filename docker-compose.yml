@@ -1,0 +1,61 @@
+# WFM 智能排班系统 —— 一键启动 web + postgres + python 优化引擎
+# 用法：docker compose up --build
+# 说明：
+#  - 本机若无 Docker，可用 SQLite 直接跑（见 README「方式 A：本地无 Docker」）。
+#  - Postgres 使用 pgvector 镜像，扩展已就绪；MVP 的 RAG 目前在应用层算余弦相似度，
+#    保证 SQLite/Postgres 通用，后续可平滑切换到 pgvector 原生向量检索。
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: wfm
+      POSTGRES_PASSWORD: wfm
+      POSTGRES_DB: wfm
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wfm"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  engine:
+    build: ./schedule-engine
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+      engine:
+        condition: service_started
+    environment:
+      DATABASE_URL: "postgresql://wfm:wfm@db:5432/wfm?schema=public"
+      SCHEDULE_ENGINE_URL: "http://engine:8000"
+      AUTH_SECRET: "dev-secret-change-me-in-prod-please-32bytes"
+      FIXED_OTP_CODE: "123456"
+      LLM_PROVIDER: "mock"
+      ANTHROPIC_API_KEY: ""
+      LLM_MODEL_ASSISTANT: "claude-haiku-4-5"
+      LLM_MODEL_SCHEDULE_PARSE: "claude-sonnet-4-5"
+      LLM_MODEL_AUDIT_CHECK: "claude-sonnet-4-5"
+      LLM_MODEL_SCHEDULE_EXPLAIN: "claude-haiku-4-5"
+      EMBEDDING_PROVIDER: "local"
+      MAX_WEEKLY_HOURS: "40"
+      MIN_REST_HOURS: "8"
+      SHIFT_HOURS: "4"
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:

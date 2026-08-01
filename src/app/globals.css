@@ -1,0 +1,180 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* WFM 桌面企业主题 */
+:root {
+  --nav-bg: #122B49;
+  --nav-bg-active: #1B3B5F;
+  --nav-bg-2: #1B3B5F;
+  --primary-reference: #149BC4;
+  --primary: #087394;
+  --primary-hover: #065E7A;
+  --primary-weak: #E3F4F8;
+  --side-bg: #FFFFFF;
+  --side-active: #E3F4F8;
+  --page-bg: #F3F5F7;
+  --surface: #FFFFFF;
+  --table-head: #F7F9FB;
+  --border: #DCE3EA;
+  --text: #273648;
+  --text-muted: #596675;
+  --success: #2F9E67;
+  --warning: #D98C22;
+  --danger: #D84A4A;
+  --shift-morning: #D8F0DD;
+  --shift-afternoon: #FFF0BF;
+  --shift-evening: #FAD7CE;
+  --shift-leave: #DCE7FA;
+  --shift-unavailable: #ECEFF3;
+  --shift-gap: #F8C9C9;
+}
+
+html,
+body {
+  background: var(--page-bg);
+  color: var(--text);
+  font-size: 13px;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  line-height: 1.45;
+  margin: 0;
+}
+
+/* 企业表格通用样式 */
+.ent-table,
+.enterprise-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  background: var(--surface);
+}
+.ent-table th,
+.enterprise-table th {
+  height: 36px;
+  background: var(--table-head);
+  color: var(--text-muted);
+  font-weight: 500;
+  text-align: left;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.ent-table td,
+.enterprise-table td {
+  height: 36px;
+  padding: 0 10px;
+  border-bottom: 1px solid #EEF1F4;
+  color: var(--text);
+  white-space: nowrap;
+}
+.ent-table tbody tr:hover,
+.enterprise-table tbody tr:hover {
+  background: #F3FAFC;
+}
+
+.enterprise-query-bar,
+.enterprise-action-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.enterprise-query-bar input,
+.enterprise-query-bar select,
+.enterprise-control,
+.enterprise-primary-button {
+  height: 32px;
+  border-radius: 4px;
+}
+
+.enterprise-primary-button {
+  border: 0;
+  padding: 0 14px;
+  color: #FFFFFF;
+  background: var(--primary);
+  font-size: 12px;
+}
+
+.enterprise-primary-button:hover {
+  background: var(--primary-hover);
+}
+
+.enterprise-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(18, 43, 73, 0.32);
+}
+
+.enterprise-dialog,
+.enterprise-drawer {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgba(18, 43, 73, 0.18);
+}
+
+.enterprise-dialog {
+  width: min(560px, calc(100vw - 64px));
+}
+
+.enterprise-drawer {
+  display: flex;
+  width: min(520px, calc(100vw - 64px));
+  height: 100%;
+  flex-direction: column;
+  border-radius: 0;
+}
+
+.enterprise-layer-header,
+.enterprise-layer-footer {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.enterprise-layer-header h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.enterprise-layer-footer {
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+}
+
+.enterprise-state {
+  display: flex;
+  min-height: 160px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+/* 细滚动条 */
+.thin-scroll::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: #cbd2dc;
+  border-radius: 4px;
+}

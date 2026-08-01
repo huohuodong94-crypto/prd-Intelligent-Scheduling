@@ -1,0 +1,523 @@
+// WFM 智能排班系统 — Prisma schema
+// -----------------------------------------------------------------------------
+// 默认使用 SQLite（本机零依赖即可跑通）。
+// 切换到 Postgres + pgvector：把下面 provider 改成 "postgresql"，
+// 并将 DATABASE_URL 指向 Postgres（见 docker-compose.yml 与 README）。
+// 注意：SQLite 不支持原生 enum / array，这里用 String 存枚举值（取值见字段注释），
+//       embedding 统一以 JSON 字符串存储，RAG 走应用层内存余弦检索，两种库通用。
+// 本文件与 schema.postgres.prisma 必须逐字同步（仅 datasource provider 不同）。
+// -----------------------------------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Store {
+  id                    String                @id @default(cuid())
+  name                  String
+  code                  String                @unique
+  address               String?
+  active                Boolean               @default(true)
+  operatingDays         StoreOperatingDay[]
+  users                 User[]
+  attendance            AttendanceRecord[]
+  attendancePunchStates AttendancePunchState[]
+  attendanceExceptions  AttendanceExceptionConfirmation[]
+  attendanceAuditEvents AttendanceAuditEvent[]
+  monthlyAttendanceConfirmations MonthlyAttendanceConfirmation[]
+  monthlyAttendanceAuditEvents   MonthlyAttendanceAuditEvent[]
+  schedules             Schedule[]
+  schedulePlans         SchedulePlan[]
+  scheduleImportBatches ScheduleImportBatch[]
+  v2sConfigs            V2SConfig[]
+  minStaffingConfigs    MinStaffingConfig[]
+  events                StoreEvent[]
+  trafficRecords        TrafficRecord[]
+  workAreas             WorkArea[]
+  workGroups            WorkGroup[]
+  aiLogs                AiInteractionLog[]
+  createdAt             DateTime              @default(now())
+}
+
+model StoreOperatingDay {
+  id        String  @id @default(cuid())
+  storeId   String
+  store     Store   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  dayOfWeek Int
+  isOpen    Boolean @default(true)
+  openTime  String
+  closeTime String
+
+  @@unique([storeId, dayOfWeek])
+  @@index([storeId])
+}
+
+model User {
+  id                 String   @id @default(cuid())
+  phone              String   @unique
+  employeeNo         String?
+  name               String
+  role               String // employee | manager | admin
+  storeId            String?
+  store              Store?   @relation(fields: [storeId], references: [id])
+  // 岗位：cashier | sales；manager 与 admin 为 null（店长不排班，不占人力）
+  position           String?
+  hireDate           DateTime @default(now())
+  // 用工类型：fulltime | parttime
+  employmentType     String   @default("fulltime")
+  // 周工时上限（小时）：全职 40，兼职 24
+  maxWeeklyHours     Float    @default(40)
+  // 销售能力标签：high | mid | low | none
+  salesAbility       String   @default("none")
+  // 绩效标签：always | almost_always | frequently | sometimes | rarely
+  performanceBand    String   @default("frequently")
+  // 假期余额（单位：小时），MVP 由 seed 初始化
+  annualLeaveBalance Float    @default(80)
+  sickLeaveBalance   Float    @default(40)
+  // 上周工时（小时）：仅作缓存展示，业务值由 scheduleBuild 从上周 Schedule 实时回算（见 T9）
+  lastWeekHours      Float    @default(0)
+
+  attendance           AttendanceRecord[]
+  attendancePunchState AttendancePunchState?
+  attendanceExceptions AttendanceExceptionConfirmation[]
+  monthlyAttendanceSubjects MonthlyAttendanceConfirmation[] @relation("MonthlyAttendanceSubject")
+  monthlyAttendanceConfirmed MonthlyAttendanceConfirmation[] @relation("MonthlyAttendanceConfirmer")
+  monthlyAttendanceAuditSubjects MonthlyAttendanceAuditEvent[] @relation("MonthlyAttendanceAuditSubject")
+  monthlyAttendanceAuditActors   MonthlyAttendanceAuditEvent[] @relation("MonthlyAttendanceAuditActor")
+  leaveRequests        LeaveRequest[]
+  schedules            Schedule[]
+  aiLogs               AiInteractionLog[]
+  unavailableSlots     UnavailableSlot[]
+  punchCorrections     PunchCorrection[]
+  createdPlans         SchedulePlan[]
+  swapRequestsMade     ShiftSwapRequest[] @relation("SwapRequester")
+  swapRequestsGot      ShiftSwapRequest[] @relation("SwapTarget")
+  ledWorkGroups        WorkGroup[]        @relation("WorkGroupLeader")
+  workGroupMemberships WorkGroupMember[]
+  createdAt            DateTime           @default(now())
+
+  @@unique([storeId, employeeNo])
+  @@index([storeId])
+}
+
+model WorkArea {
+  id      String            @id @default(cuid())
+  storeId String
+  store   Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  name    String
+  code    String
+  active  Boolean           @default(true)
+  members WorkGroupMember[]
+
+  @@unique([storeId, code])
+  @@index([storeId])
+}
+
+model WorkGroup {
+  id         String            @id @default(cuid())
+  storeId    String
+  store      Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  name       String
+  leaderId   String
+  leader     User              @relation("WorkGroupLeader", fields: [leaderId], references: [id])
+  volumeType String
+  active     Boolean           @default(true)
+  members    WorkGroupMember[]
+
+  @@unique([storeId, name])
+  @@index([storeId])
+  @@index([leaderId])
+}
+
+model WorkGroupMember {
+  id            String    @id @default(cuid())
+  workGroupId   String
+  workGroup     WorkGroup @relation(fields: [workGroupId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workAreaId    String
+  workArea      WorkArea  @relation(fields: [workAreaId], references: [id])
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+
+  @@index([workGroupId, userId])
+  @@index([userId, effectiveFrom])
+}
+
+model AttendanceRecord {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id])
+  time      DateTime @default(now())
+  direction String   @default("in") // in | out
+  viaCode   Boolean  @default(false) // 是否通过动态码打卡
+  corrected Boolean  @default(false) // 是否来自补卡
+  clockWindow String? // 动态码匹配的分钟窗口；补卡为 null
+
+  @@index([userId])
+  @@index([storeId])
+  @@unique([userId, clockWindow])
+}
+
+model AttendancePunchState {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeId       String
+  store         Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  lastDirection String // in | out
+  version       Int      @default(1)
+  updatedAt     DateTime @updatedAt
+
+  @@index([storeId])
+}
+
+model AttendanceExceptionConfirmation {
+  id            String   @id @default(cuid())
+  storeId       String
+  store         Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date          DateTime
+  type          String // late | early_leave | missing_in | missing_out | unscheduled
+  status        String   @default("unconfirmed") // unconfirmed | confirmed
+  active        Boolean  @default(true)
+  revision      Int      @default(1)
+  confirmedById String?
+  confirmedAt   DateTime?
+
+  @@unique([userId, date, type])
+  @@index([storeId, date])
+}
+
+model AttendanceAuditEvent {
+  id           String   @id @default(cuid())
+  storeId      String
+  store        Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  actorId      String
+  userId       String?
+  action       String
+  subjectId    String?
+  metadataJson String?
+  createdAt    DateTime @default(now())
+
+  @@index([storeId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model MonthlyAttendanceConfirmation {
+  id                   String   @id @default(cuid())
+  storeId              String
+  store                Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  userId               String
+  user                 User     @relation("MonthlyAttendanceSubject", fields: [userId], references: [id], onDelete: Cascade)
+  month                String
+  status               String   @default("unconfirmed") // unconfirmed | confirmed
+  zeroAttendanceAction String   @default("none") // none | normal_attendance | supplement_hours
+  revision             Int      @default(0)
+  sourceHash           String?
+  sourceSnapshotJson   String?
+  confirmedById        String?
+  confirmedBy          User?    @relation("MonthlyAttendanceConfirmer", fields: [confirmedById], references: [id], onDelete: SetNull)
+  confirmedAt          DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  auditEvents          MonthlyAttendanceAuditEvent[]
+
+  @@unique([userId, month])
+  @@index([storeId, month])
+}
+
+model MonthlyAttendanceAuditEvent {
+  id                   String   @id @default(cuid())
+  confirmationId       String
+  confirmation         MonthlyAttendanceConfirmation @relation(fields: [confirmationId], references: [id], onDelete: Cascade)
+  storeId              String
+  store                Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  userId               String
+  user                 User     @relation("MonthlyAttendanceAuditSubject", fields: [userId], references: [id], onDelete: Cascade)
+  month                String
+  eventType            String // confirmed | unconfirmed | invalidated
+  fromStatus           String
+  toStatus             String
+  revision             Int
+  zeroAttendanceAction String
+  actorId              String
+  actor                User     @relation("MonthlyAttendanceAuditActor", fields: [actorId], references: [id])
+  reason               String
+  sourceRef            String
+  sourceHash           String?
+  sourceSnapshotJson   String?
+  createdAt            DateTime @default(now())
+
+  @@index([storeId, month, userId, createdAt])
+  @@index([confirmationId, createdAt])
+}
+
+model LeaveRequest {
+  id                     String   @id @default(cuid())
+  userId                 String
+  user                   User     @relation(fields: [userId], references: [id])
+  type                   String // annual | sick
+  startTime              DateTime
+  endTime                DateTime
+  isFullDay              Boolean  @default(true)
+  hours                  Float // 自动计算的请假时长（小时）
+  reason                 String?
+  status                 String   @default("pending") // pending | approved | rejected
+  // AI 合规校验建议（仅辅助，最终由人工确认）
+  aiComplianceSuggestion String? // compliant | suspicious
+  aiComplianceReason     String?
+  decidedById            String?
+  decidedAt              DateTime?
+  decisionReason         String?
+  createdAt              DateTime @default(now())
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Schedule {
+  id        String        @id @default(cuid())
+  storeId   String
+  store     Store         @relation(fields: [storeId], references: [id])
+  userId    String
+  user      User          @relation(fields: [userId], references: [id])
+  date      DateTime // 排班日期（当天）
+  shiftType String // morning | afternoon | evening
+  weekOf    String // 该周的周一日期，格式 YYYY-MM-DD
+  source    String        @default("manual") // manual | ai_generated | swap
+  planId    String?
+  plan      SchedulePlan? @relation(fields: [planId], references: [id])
+  createdAt DateTime      @default(now())
+
+  swapAsRequested ShiftSwapRequest[] @relation("SwapReqSchedule")
+  swapAsTarget    ShiftSwapRequest[] @relation("SwapTgtSchedule")
+
+  @@unique([userId, date, shiftType])
+  @@index([storeId, weekOf])
+  @@index([planId])
+}
+
+// 排班计划周实体：向导状态载体（Sprint 2 接入四步向导）
+model SchedulePlan {
+  id                    String                @id @default(cuid())
+  storeId               String
+  store                 Store                 @relation(fields: [storeId], references: [id])
+  weekOf                String // 该周的周一日期，格式 YYYY-MM-DD
+  mode                  String                @default("work5rest2") // work5rest2 | work6rest1
+  status                String                @default("draft") // draft | recommended | published
+  version               Int                   @default(0)
+  recommendationJson    String?
+  recommendationAiLogId String?               @unique
+  recommendationAiLog   AiInteractionLog?     @relation("CurrentRecommendation", fields: [recommendationAiLogId], references: [id], onDelete: SetNull)
+  createdById           String
+  createdBy             User                  @relation(fields: [createdById], references: [id])
+  schedules             Schedule[]
+  forecasts             TrafficForecast[]
+  importBatches         ScheduleImportBatch[]
+  aiLogs                AiInteractionLog[]    @relation("PlanAiLogs")
+  publishedAt           DateTime?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  @@unique([storeId, weekOf])
+  @@index([storeId])
+}
+
+model ScheduleImportBatch {
+  id                 String       @id @default(cuid())
+  storeId            String
+  store              Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  planId             String
+  plan               SchedulePlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  fileName           String
+  status             String // validated | imported | failed
+  validatedVersion   Int
+  totalRows          Int
+  successRows        Int
+  errorRows          Int
+  errorsJson         String
+  normalizedRowsJson String
+  createdById        String
+  createdAt          DateTime     @default(now())
+
+  @@index([storeId, planId])
+  @@index([createdById])
+}
+
+// 客流转人力（Visitors To Staff）折算区间配置
+model V2SConfig {
+  id        String @id @default(cuid())
+  storeId   String
+  store     Store  @relation(fields: [storeId], references: [id])
+  dayOfWeek Int // 0=周日 ... 6=周六
+  v2sLower  Float // 每人服务客流下界
+  v2sUpper  Float // 每人服务客流上界
+
+  @@unique([storeId, dayOfWeek])
+}
+
+// 各班次最低人力配置（按岗位）
+model MinStaffingConfig {
+  id           String @id @default(cuid())
+  storeId      String
+  store        Store  @relation(fields: [storeId], references: [id])
+  dayOfWeek    Int // 0=周日 ... 6=周六
+  timeSlot     String // morning | afternoon | evening
+  position     String // cashier | sales
+  minHeadcount Int    @default(1)
+
+  @@unique([storeId, dayOfWeek, timeSlot, position])
+}
+
+// 活动日历：影响客流的门店事件
+model StoreEvent {
+  id      String   @id @default(cuid())
+  storeId String
+  store   Store    @relation(fields: [storeId], references: [id])
+  date    DateTime
+  label   String // promo | new_arrival | holiday
+  factor  Float // 客流放大系数（promo 1.3 / new_arrival 1.15 / holiday 1.4）
+
+  @@unique([storeId, date, label])
+  @@index([storeId, date])
+}
+
+// 历史客流（seed 仿真生成，8 周）
+model TrafficRecord {
+  id       String   @id @default(cuid())
+  storeId  String
+  store    Store    @relation(fields: [storeId], references: [id])
+  date     DateTime
+  timeSlot String // morning | afternoon | evening
+  visitors Int
+
+  @@unique([storeId, date, timeSlot])
+  @@index([storeId, date])
+}
+
+// 客流预测与人工调整留痕（Sprint 2 向导 Step 2 写入）
+model TrafficForecast {
+  id           String       @id @default(cuid())
+  planId       String
+  plan         SchedulePlan @relation(fields: [planId], references: [id])
+  date         DateTime
+  timeSlot     String // morning | afternoon | evening
+  predicted    Float
+  adjusted     Float?
+  adjustReason String?
+
+  @@unique([planId, date, timeSlot])
+  @@index([planId])
+}
+
+// 员工不可供班登记：引擎硬约束来源
+model UnavailableSlot {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  date      DateTime
+  timeSlot  String // morning | afternoon | evening
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@unique([userId, date, timeSlot])
+  @@index([userId])
+}
+
+// 补卡申请单
+model PunchCorrection {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  date          DateTime
+  direction     String // in | out
+  requestedTime DateTime
+  reason        String?
+  status        String   @default("pending") // pending | approved | rejected
+  aiSuggestion  String? // compliant | suspicious（仅建议）
+  aiReason      String?
+  decidedById   String?
+  decidedAt     DateTime?
+  decisionReason String?
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([status])
+}
+
+// 换班申请：仅限同岗位；AI 只给建议，审批必须人工触发
+model ShiftSwapRequest {
+  id                String   @id @default(cuid())
+  requesterId       String
+  requester         User     @relation("SwapRequester", fields: [requesterId], references: [id])
+  targetUserId      String
+  targetUser        User     @relation("SwapTarget", fields: [targetUserId], references: [id])
+  reqScheduleId     String
+  reqSchedule       Schedule @relation("SwapReqSchedule", fields: [reqScheduleId], references: [id])
+  tgtScheduleId     String
+  tgtSchedule       Schedule @relation("SwapTgtSchedule", fields: [tgtScheduleId], references: [id])
+  status            String   @default("pending_target") // pending_target | pending_manager | approved | rejected
+  engineCheckResult String? // 引擎校验结果（JSON 字符串）
+  aiSuggestion      String? // compliant | suspicious（仅建议）
+  aiReason          String?
+  decidedById       String?
+  decidedAt         DateTime?
+  decisionReason    String?
+  createdAt         DateTime @default(now())
+
+  @@index([requesterId])
+  @@index([targetUserId])
+  @@index([status])
+}
+
+model AiInteractionLog {
+  id                       String        @id @default(cuid())
+  userId                   String?
+  user                     User?         @relation(fields: [userId], references: [id])
+  storeId                  String?
+  store                    Store?        @relation(fields: [storeId], references: [id])
+  planId                   String?
+  plan                     SchedulePlan? @relation("PlanAiLogs", fields: [planId], references: [id])
+  currentRecommendationFor SchedulePlan? @relation("CurrentRecommendation")
+  eventKind                String?
+  approvalType             String? // leave | punch_correction | shift_swap
+  approvalId               String?
+  feature                  String // assistant | schedule_advisor | audit_checker
+  provider                 String? // 实际调用的 provider：deepseek | anthropic | mock
+  model                    String? // 实际调用的模型名
+  inputText                String
+  outputText               String
+  // 反馈闭环核心：是否被采纳 / 是否被人工修改
+  wasAccepted              Boolean?
+  wasEdited                Boolean?
+  // 编辑距离度量（排班场景：人工改动了多少格）
+  editedCells              Int?
+  totalCells               Int?
+  editRatio                Float?
+  createdAt                DateTime      @default(now())
+
+  @@index([feature])
+  @@index([createdAt])
+  @@index([eventKind])
+  @@index([approvalType, approvalId])
+  @@index([storeId, planId, eventKind])
+}
+
+// RAG 规则库：预置业务规则片段 + embedding（JSON 字符串）
+model RuleChunk {
+  id        String   @id @default(cuid())
+  title     String
+  category  String // leave | attendance | schedule | general
+  content   String
+  embedding String // JSON 序列化的 float 向量
+  createdAt DateTime @default(now())
+}

@@ -1,0 +1,33 @@
+# 依赖
+node_modules/
+
+# Python 虚拟环境
+.venv/
+__pycache__/
+*.pyc
+
+# 环境变量（禁止提交真实 Key）
+.env
+.env.local
+
+# 数据库（本地模拟数据，可随时重建）
+prisma/dev.db
+prisma/dev.db-journal
+prisma/test.db
+prisma/test.db-journal
+
+# Next.js 构建产物
+.next/
+out/
+test-results/
+playwright-report/
+
+# Task 10 外部视觉参考源（只允许从工作区外读取）
+*_WFM排班项目_店铺经理操作手册.pptx
+
+# TypeScript 增量编译缓存
+tsconfig.tsbuildinfo
+
+# 系统文件
+.DS_Store
+.vercel/
